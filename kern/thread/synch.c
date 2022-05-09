@@ -142,7 +142,6 @@ struct lock *
 lock_create(const char *name)
 {
         struct lock *lock;
-
         lock = kmalloc(sizeof(*lock));
         if (lock == NULL) {
                 return NULL;
@@ -157,7 +156,19 @@ lock_create(const char *name)
 	HANGMAN_LOCKABLEINIT(&lock->lk_hangman, lock->lk_name);
 
         // add stuff here as needed
-
+        lock -> lock_sem = sem_create(lock->lk_name, 1);
+        if(lock -> lock_sem == NULL){
+                kfree(lock->lk_name);
+		kfree(lock);
+		return NULL;
+        }
+	lock->lock_wchan = wchan_create(lock->lk_name);
+	if (lock->lock_wchan == NULL) {
+		kfree(lock->lk_name);
+		kfree(lock);
+		return NULL;
+	}
+	spinlock_init(&lock->lock_spinlock);
         return lock;
 }
 
@@ -180,10 +191,24 @@ lock_acquire(struct lock *lock)
 
         // Write this
 
-        (void)lock;  // suppress warning until code gets written
+        //(void)lock;  // suppress warning until code gets written
 
 	/* Call this (atomically) once the lock is acquired */
 	//HANGMAN_ACQUIRE(&curthread->t_hangman, &lock->lk_hangman);
+
+        // my implementation
+        
+        // SEMAPHORE 
+        // P(lock->lock_sem);
+        // SPINLOCK
+        spinlock_acquire(&lock -> lock_spinlock);
+        while(lock -> thread_owner != NULL){
+                wchan_sleep(lock->lock_wchan, &lock->lock_spinlock);
+        }
+        KASSERT(lock->thread_owner == NULL);
+        lock -> thread_owner = curthread,
+        spinlock_release(&lock -> lock_spinlock);
+        (void)lock;
 }
 
 void
@@ -192,8 +217,15 @@ lock_release(struct lock *lock)
 	/* Call this (atomically) when the lock is released */
 	//HANGMAN_RELEASE(&curthread->t_hangman, &lock->lk_hangman);
 
-        // Write this
-
+        // SEMAPHORE
+        // V(lock->lock_sem);
+        // SPINLOCK
+        KASSERT(lock != NULL);
+        KASSERT(lock_do_i_hold(lock));
+        spinlock_acquire(&lock->lock_spinlock);
+        lock->thread_owner = NULL;
+        wchan_wakeone(lock->lock_wchan, &lock->lock_spinlock);
+        spinlock_release(&lock->lock_spinlock);
         (void)lock;  // suppress warning until code gets written
 }
 
@@ -204,7 +236,11 @@ lock_do_i_hold(struct lock *lock)
 
         (void)lock;  // suppress warning until code gets written
 
-        return true; // dummy until code gets written
+        bool res;
+        spinlock_acquire(&lock->lock_spinlock);
+        res = lock->thread_owner == curthread;
+        spinlock_release(&lock->lock_spinlock);
+        return res; // dummy until code gets written
 }
 
 ////////////////////////////////////////////////////////////

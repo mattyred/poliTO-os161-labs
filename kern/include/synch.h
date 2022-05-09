@@ -29,13 +29,13 @@
 
 #ifndef _SYNCH_H_
 #define _SYNCH_H_
-
 /*
  * Header file for synchronization primitives.
  */
 
 
 #include <spinlock.h>
+#include <thread.h>
 
 /*
  * Dijkstra-style semaphore.
@@ -77,6 +77,10 @@ struct lock {
         HANGMAN_LOCKABLE(lk_hangman);   /* Deadlock detector hook. */
         // add what you need here
         // (don't forget to mark things volatile as needed)
+        struct wchan *lock_wchan; // copeid from semaphore
+	struct spinlock lock_spinlock; // copied from semaphore
+        struct semaphore * lock_sem;
+        volatile struct thread * thread_owner;
 };
 
 struct lock *lock_create(const char *name);

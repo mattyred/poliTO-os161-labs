@@ -39,6 +39,95 @@
 #include <addrspace.h>
 #include <vm.h>
 
+// MY CODE -----------------------------------------------
+static struct spinlock freemem_lock = SPINLOCK_INITIALIZER;
+
+static unsigned char * freeRamFrames = NULL;
+static unsigned long * allocSize = NULL;
+static int nRamFrames = 0;
+
+static int allocTableActive = 0;
+
+static int isTableActive(){
+	int active;
+	spinlock_acquire(&freemem_lock);
+	active = allocTableActive;
+	spinlock_release(&freemem_lock);
+	return active;
+}
+
+static paddr_t getfreeppages(unsigned long npages){
+	paddr_t addr;
+	long i, first, found, np = (long)npages;
+
+	if(!isTableActive()){
+		return 0;
+	}
+	spinlock_acquire(&freemem_lock);
+	/* Linear search of a free interval */
+	for(i=0,first=found=-1; i<nRamFrames; i++){
+		if(freeRamFrames[i]){
+			if(i==0 || !freeRamFrames[i-1]){
+				/* If we are in the first cell or in a cell where there is 1 and a 0 above (that cell is the
+				*  first free cell of a block of free cells)
+				*/
+				first = i;
+			}
+			if(i-first+1 >= np){
+				/* I enter here when i find a free cell and i have finished because i have found a continuous block
+				*  of np free cells
+				*/
+				found = first;
+				break;
+			}
+		}
+	}
+
+	if(found >= 0){
+		for(i=found; i<found+np; i++){
+			freeRamFrames[i] = (unsigned char)0;
+		}
+		allocSize[found] = np;
+		addr = (paddr_t) found * PAGE_SIZE;
+	}else{
+		addr = 0;
+	}
+
+	spinlock_release(&freemem_lock);
+	return addr;
+}
+
+void getmemstats(){
+	kprintf("## Statistics About Free And Occupied Ram ##\n");
+	int i;
+	int free_cells = 0;
+	int occ_cells = 0;
+	for(i=0; i<nRamFrames; i++){
+		(freeRamFrames[i] == 0)? occ_cells++ : free_cells++;
+	}
+	kprintf("- Free Frames: %d\n", free_cells);
+	kprintf("- Occupied Frames: %d\n\n", occ_cells);
+}
+
+static int freeppages(paddr_t addr, unsigned long npages){
+	long i, first, np=(long)npages;
+	if(!isTableActive()) return 0;
+	first = addr / PAGE_SIZE;
+	KASSERT(allocSize != NULL);
+	KASSERT(nRamFrames>first);
+
+	spinlock_acquire(&freemem_lock);
+	for(i=first; i<first+np; i++){
+		freeRamFrames[i] = (unsigned char)1;
+	}
+
+	spinlock_release(&freemem_lock);
+
+	return 1;
+}
+
+// END MY CODE --------------------------------------------
+
 /*
  * Dumb MIPS-only "VM system" that is intended to only be just barely
  * enough to struggle off the ground. You should replace all of this
@@ -66,8 +155,26 @@ static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;
 
 void
 vm_bootstrap(void)
-{
-	/* Do nothing. */
+{	
+	// MY CODE ------------------------------------------------
+	int i;
+	nRamFrames = ((int)ram_getsize()) / PAGE_SIZE;
+	/* alloc freeRamFrame and allocSize */
+	freeRamFrames = kmalloc(sizeof(unsigned char)*nRamFrames);
+	allocSize = kmalloc(sizeof(unsigned long)*nRamFrames);
+	if(freeRamFrames == NULL || allocSize == NULL){
+		freeRamFrames = NULL;
+		allocSize = NULL;
+		return;
+	}
+	for(i=0;i<nRamFrames;i++){
+		freeRamFrames[i] = (unsigned char)0; // in slides ther is 0... but 0 means occupied and 1 means free
+		allocSize[i] = 0;
+	}
+	spinlock_acquire(&freemem_lock);
+	allocTableActive = 1;
+	spinlock_release(&freemem_lock);
+	// END MY CODE ---------------------------------------------
 }
 
 /*
@@ -96,12 +203,21 @@ getppages(unsigned long npages)
 {
 	paddr_t addr;
 
-	spinlock_acquire(&stealmem_lock);
-
-	addr = ram_stealmem(npages);
-
-	spinlock_release(&stealmem_lock);
+	// MY CODE -----------------------------
+	/* try to search among free pages */
+	addr = getfreeppages(npages);
+	if(addr==0){ /* Call stealmem (in the original version getppages() directly call ram_stealmem())*/
+		spinlock_acquire(&stealmem_lock);
+		addr = ram_stealmem(npages);
+		spinlock_release(&stealmem_lock);
+	}
+	if(addr != 0 && isTableActive()){
+		spinlock_acquire(&stealmem_lock);
+		allocSize[addr/PAGE_SIZE] = npages;
+		spinlock_release(&stealmem_lock);
+	}
 	return addr;
+	// END MY CODE --------------------------
 }
 
 /* Allocate/free some kernel-space virtual pages */
@@ -121,9 +237,15 @@ alloc_kpages(unsigned npages)
 void
 free_kpages(vaddr_t addr)
 {
-	/* nothing - leak the memory. */
-
-	(void)addr;
+	// MY CODE --
+	if(isTableActive()){
+		paddr_t paddr = addr - MIPS_KSEG0;
+		long first = paddr/PAGE_SIZE;
+		KASSERT(nRamFrames > first);
+		freeppages(paddr, allocSize[first]);
+	}
+	// END MY CODE
+	(void) addr;
 }
 
 void
@@ -257,6 +379,9 @@ void
 as_destroy(struct addrspace *as)
 {
 	dumbvm_can_sleep();
+	freeppages(as->as_pbase1, as->as_npages1);
+	freeppages(as->as_pbase2, as->as_npages2);
+	freeppages(as->as_stackpbase, DUMBVM_STACKPAGES);
 	kfree(as);
 }
 

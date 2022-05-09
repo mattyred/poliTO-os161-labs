@@ -5,5 +5,6 @@ file_syscalls.o: ../../syscall/file_syscalls.c ../../include/types.h \
  ../../include/array.h ../../include/spinlock.h ../../include/hangman.h \
  opt-hangman.h includelinks/machine/spinlock.h ../../include/threadlist.h \
  includelinks/machine/thread.h ../../include/setjmp.h \
- includelinks/kern/machine/setjmp.h ../../include/addrspace.h \
- ../../include/vm.h includelinks/machine/vm.h opt-dumbvm.h
+ includelinks/kern/machine/setjmp.h ../../include/proc.h \
+ ../../include/addrspace.h ../../include/vm.h includelinks/machine/vm.h \
+ opt-dumbvm.h

@@ -45,6 +45,7 @@
 #include <test.h>
 #include "opt-sfs.h"
 #include "opt-net.h"
+#include <vm.h> // MY CODE
 
 /*
  * In-kernel menu and command dispatcher.
@@ -595,6 +596,19 @@ cmd_testmenu(int n, char **a)
 	return 0;
 }
 
+// MY CODE ------------------------
+static
+int
+cmd_memstats(int nargs, char **args){
+	(void)nargs;
+	(void)args;
+	
+	getmemstats();
+
+	return 0;
+}
+// END MY CODE --------------------
+
 static const char *mainmenu[] = {
 	"[?o] Operations menu                ",
 	"[?t] Tests menu                     ",
@@ -652,6 +666,7 @@ static struct {
 	{ "kh",         cmd_kheapstats },
 	{ "khgen",      cmd_kheapgeneration },
 	{ "khdump",     cmd_kheapdump },
+	{ "memstats",	cmd_memstats}, // MY CODE
 
 	/* base system tests */
 	{ "at",		arraytest },
